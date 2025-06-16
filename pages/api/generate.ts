@@ -12,8 +12,11 @@ const openai = new OpenAI();
 
 /**
  * POST /api/generate
- * Body: { items: [{dish,desc,price}], languages: ["fr","es"] }
- * Returns: { slug }  –  slug is the URL segment diners will scan
+ * Body: {
+ *   items: [{ dish:string; desc:string; price:number }],
+ *   languages: string[]
+ * }
+ * Returns: { slug: string }
  */
 export default async function handler(
   req: NextApiRequest,
@@ -26,29 +29,48 @@ export default async function handler(
     languages: string[];
   };
 
-  /* ---------- prompt GPT to translate ---------- */
+  /* ---------- build prompt ---------- */
   const prompt = `
 Translate the following JSON menu into: ${languages.join(', ')}.
-Return ONLY valid JSON with the same shape, keyed by language code (no markdown).
+Return ONLY valid JSON with identical shape, keyed by language code.
 
 ${JSON.stringify(items)}
 `;
 
+  /* ---------- call OpenAI ---------- */
   const chat = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
         role: 'system',
         content:
-          'You are a culinary translator. Respond ONLY with pure JSON—no code block or extra text.'
+          'You are a culinary translator. Respond ONLY with raw JSON—no markdown, no commentary.'
       },
       { role: 'user', content: prompt }
     ],
-    response_format: { type: 'json_object' } // forces valid JSON
+    response_format: { type: 'json_object' } // forces JSON mode
   });
 
-  /* ---------- parse and store ---------- */
-  const translated = JSON.parse(chat.choices[0].message.content!);
+  /* ---------- robust JSON extraction ---------- */
+  let content = (chat.choices[0].message.content ?? '').trim();
+
+  if (!content.startsWith('{')) {
+    const first = content.indexOf('{');
+    const last = content.lastIndexOf('}');
+    if (first !== -1 && last !== -1) content = content.slice(first, last + 1);
+  }
+
+  let translated: unknown;
+  try {
+    translated = JSON.parse(content);
+  } catch (err) {
+    console.error('generate-parse-error:', content.slice(0, 120));
+    return res
+      .status(500)
+      .json({ error: 'Invalid JSON from OpenAI', snippet: content.slice(0, 120) });
+  }
+
+  /* ---------- store in Supabase ---------- */
   const slug = nanoid(8);
 
   const { error } = await supabase
@@ -56,6 +78,7 @@ ${JSON.stringify(items)}
     .insert({ slug, languages, json_menu: translated });
 
   if (error) {
+    console.error('supabase-insert-error:', error.message);
     return res.status(500).json({ error: error.message });
   }
 
