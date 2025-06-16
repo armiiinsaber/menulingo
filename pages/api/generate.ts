@@ -25,18 +25,16 @@ ${JSON.stringify(items)}
 `;
 
   const chat = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [{ role: 'user', content: prompt }],
-    max_tokens: 4000
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are a culinary translator. When you answer, ' +
+          'return ONLY valid JSON — no markdown, no code block, no commentary.'
+      },
+      { role: 'user', content: prompt }
+    ],
+    response_format: { type: 'json_object' }   // <-- forces valid JSON
   });
 
-  const translated = JSON.parse(chat.choices[0].message.content!);
-  const slug = nanoid(8);
-
-  const { error } = await supabase.from('menus').insert({
-    slug, languages, json_menu: translated
-  });
-  if (error) return res.status(500).json({ error: error.message });
-
-  res.status(200).json({ slug });
-}
