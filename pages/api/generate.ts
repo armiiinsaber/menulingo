@@ -63,11 +63,11 @@ ${JSON.stringify(items)}
   let translated: unknown;
   try {
     translated = JSON.parse(content);
-  } catch (err) {
-    console.error('generate-parse-error:', content.slice(0, 120));
+  } catch (parseErr) {
+    console.error('generate-parse-error:', parseErr);
     return res
       .status(500)
-      .json({ error: 'Invalid JSON from OpenAI', snippet: content.slice(0, 120) });
+      .json({ error: 'Invalid JSON from OpenAI', detail: String(parseErr).slice(0, 120) });
   }
 
   /* ---------- store in Supabase ---------- */
@@ -84,3 +84,4 @@ ${JSON.stringify(items)}
 
   res.status(200).json({ slug });
 }
+
