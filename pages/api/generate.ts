@@ -7,9 +7,18 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
+
 const openai = new OpenAI();
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+/**
+ * POST /api/generate
+ * Body: { items: [{dish,desc,price}], languages: ["fr","es"] }
+ * Returns: { slug }  –  slug is the URL segment diners will scan
+ */
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const { items, languages } = req.body as {
@@ -17,9 +26,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     languages: string[];
   };
 
+  /* ---------- prompt GPT to translate ---------- */
   const prompt = `
 Translate the following JSON menu into: ${languages.join(', ')}.
-Return the same JSON keyed by language code.
+Return ONLY valid JSON with the same shape, keyed by language code (no markdown).
 
 ${JSON.stringify(items)}
 `;
@@ -30,11 +40,24 @@ ${JSON.stringify(items)}
       {
         role: 'system',
         content:
-          'You are a culinary translator. When you answer, ' +
-          'return ONLY valid JSON — no markdown, no code block, no commentary.'
+          'You are a culinary translator. Respond ONLY with pure JSON—no code block or extra text.'
       },
       { role: 'user', content: prompt }
     ],
-    response_format: { type: 'json_object' }   // <-- forces valid JSON
+    response_format: { type: 'json_object' } // forces valid JSON
   });
 
+  /* ---------- parse and store ---------- */
+  const translated = JSON.parse(chat.choices[0].message.content!);
+  const slug = nanoid(8);
+
+  const { error } = await supabase
+    .from('menus')
+    .insert({ slug, languages, json_menu: translated });
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.status(200).json({ slug });
+}
